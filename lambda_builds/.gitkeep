@@ -1,0 +1,14 @@
+# lambda_builds/
+# Este directorio es generado automáticamente por Terraform (archive_file).
+# Los archivos .zip son creados cuando ejecutas `terraform plan` o `terraform apply`.
+# 
+# PREREQUISITO — ejecutar ANTES de terraform apply:
+#
+#   cd lambda_src/upload
+#   npm install
+#
+#   cd ../crop
+#   npm install --platform=linux --arch=x64 sharp
+#
+# El flag --platform=linux --arch=x64 en sharp es OBLIGATORIO porque Lambda
+# corre sobre Linux x86_64, aunque tu máquina sea Windows o Mac.
