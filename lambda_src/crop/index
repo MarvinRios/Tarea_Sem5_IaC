@@ -1,0 +1,91 @@
+import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
+import sharp from "sharp";
+import path from "path";
+
+const s3 = new S3Client({ region: process.env.AWS_REGION ?? "us-east-1" });
+
+const BUCKET          = process.env.S3_BUCKET;
+const PROCESSED_PREFIX = process.env.PROCESSED_PREFIX ?? "processed/";
+
+// Máscara SVG circular (40×40) para recorte con transparencia
+const CIRCLE_SVG = Buffer.from(`
+  <svg width="40" height="40" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+    <circle cx="20" cy="20" r="20" fill="white"/>
+  </svg>
+`);
+
+export const handler = async (event) => {
+  const batchItemFailures = [];
+
+  for (const record of event.Records) {
+    const messageId = record.messageId;
+
+    try {
+      // El cuerpo del mensaje SQS contiene la notificación S3
+      const body = JSON.parse(record.body);
+
+      // Manejar el formato de notificación S3 estándar
+      const s3Event = body.Records?.[0]?.s3;
+      if (!s3Event) {
+        console.warn(`Mensaje ${messageId}: sin datos S3, saltando.`);
+        continue;
+      }
+
+      const sourceKey = decodeURIComponent(s3Event.object.key.replace(/\+/g, " "));
+      console.log(`Procesando: ${sourceKey}`);
+
+      // 1. Descargar imagen original desde S3
+      const getResult = await s3.send(new GetObjectCommand({
+        Bucket: BUCKET,
+        Key:    sourceKey,
+      }));
+
+      // Convertir stream a buffer
+      const imageBuffer = await streamToBuffer(getResult.Body);
+
+      // 2. Recortar a 40×40 con máscara circular usando sharp
+      const circularPng = await sharp(imageBuffer)
+        .resize(40, 40, { fit: "cover", position: "center" })
+        .composite([{
+          input: CIRCLE_SVG,
+          blend: "dest-in",  // Aplica la máscara: mantiene solo el área blanca del SVG
+        }])
+        .png()
+        .toBuffer();
+
+      // 3. Construir la clave de destino
+      const baseName     = path.basename(sourceKey, path.extname(sourceKey));
+      const destKey      = `${PROCESSED_PREFIX}${baseName}_circular.png`;
+
+      // 4. Guardar PNG recortado en processed/
+      await s3.send(new PutObjectCommand({
+        Bucket:      BUCKET,
+        Key:         destKey,
+        Body:        circularPng,
+        ContentType: "image/png",
+      }));
+
+      console.log(`Guardado: ${destKey} (${circularPng.length} bytes)`);
+
+    } catch (err) {
+      console.error(`Error procesando mensaje ${messageId}:`, err);
+      // Marcar este mensaje como fallido → vuelve a la cola para reintento
+      batchItemFailures.push({ itemIdentifier: messageId });
+    }
+  }
+
+  // Lambda ESM con ReportBatchItemFailures:
+  // Solo los mensajes en batchItemFailures se reintentan.
+  // El resto se elimina de la cola automáticamente.
+  return { batchItemFailures };
+};
+
+// ── Helper: convertir ReadableStream a Buffer ─────────────
+async function streamToBuffer(stream) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    stream.on("data", (chunk) => chunks.push(chunk));
+    stream.on("end",  ()      => resolve(Buffer.concat(chunks)));
+    stream.on("error", reject);
+  });
+}
