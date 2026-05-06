@@ -1,22 +1,3 @@
-##############################################################################
-# modules/api/main.tf
-#
-# API Gateway HTTP API v2:
-#   - Ruta: POST /upload
-#   - Protocolo: HTTPS (TLS 1.2+ gestionado por AWS para HTTP APIs)
-#   - Payload format: 2.0
-#   - CORS: habilitado
-#   - Stage: $default con auto-deploy
-#   - Throttling: reducido a 100 rps para el lab (el diagrama dice 10,000 rps,
-#     pero eso no aplica para un lab y AWS puede limitar en cuentas nuevas)
-#   - Access logs a CloudWatch
-#
-# JUSTIFICACIÓN DE CAMBIO DE THROTTLING:
-#   El diagrama especifica 10,000 rps. Para este laboratorio se configura
-#   100 rps ya que es más que suficiente para pruebas y evita costos
-#   inesperados por invocaciones accidentales masivas.
-##############################################################################
-
 # ──────────────────────────────────────────────────────────
 # HTTP API v2
 # ──────────────────────────────────────────────────────────
@@ -57,7 +38,7 @@ resource "aws_apigatewayv2_stage" "default" {
   access_log_settings {
     destination_arn = aws_cloudwatch_log_group.apigw.arn
 
-    # Formato JSON de access log (según especificación del diagrama)
+    # Formato JSON de access log
     format = jsonencode({
       requestId        = "$context.requestId"
       sourceIp         = "$context.identity.sourceIp"
@@ -74,7 +55,7 @@ resource "aws_apigatewayv2_stage" "default" {
 
   default_route_settings {
     throttling_burst_limit = 50
-    throttling_rate_limit  = 100 # Reducido de 10,000 a 100 rps para el lab
+    throttling_rate_limit  = 100 # Reducido de 10,000 a 100 rps
   }
 
   tags = { Name = "${var.name_prefix}-stage-default" }
@@ -87,7 +68,7 @@ resource "aws_apigatewayv2_integration" "upload_lambda" {
   api_id             = aws_apigatewayv2_api.main.id
   integration_type   = "AWS_PROXY"
   integration_uri    = var.upload_lambda_invoke_arn
-  payload_format_version = "2.0"  # Payload format version 2.0 (según diagrama)
+  payload_format_version = "2.0"  # Payload format version 2.0
 
   timeout_milliseconds = 29000  # 29s (límite máximo de HTTP API)
 }
